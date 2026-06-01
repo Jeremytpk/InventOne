@@ -30,7 +30,8 @@ import {
   Sparkles, 
   RefreshCw,
   Check,
-  Fuel
+  Fuel,
+  Fingerprint
 } from 'lucide-react';
 
 interface AdminPanelProps {
@@ -41,6 +42,7 @@ export default function AdminPanel({ adminUser }: AdminPanelProps) {
   // Global States
   const [users, setUsers] = useState<User[]>([]);
   const [inventory, setInventory] = useState<InventoryItem | null>(null);
+  const [companyInventories, setCompanyInventories] = useState<Record<string, { quantity: number; minStockAlert: number; updatedAt: any }>>({});
   const [clientStocks, setClientStocks] = useState<ClientStock[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
@@ -83,6 +85,7 @@ export default function AdminPanel({ adminUser }: AdminPanelProps) {
           companyId: data.companyId || '',
           requestedCompanyId: data.requestedCompanyId || '',
           requestedCompanyName: data.requestedCompanyName || '',
+          loginId: data.loginId || '',
         });
       });
       setUsers(uList);
@@ -90,9 +93,11 @@ export default function AdminPanel({ adminUser }: AdminPanelProps) {
       handleFirestoreError(err, OperationType.LIST, 'users');
     });
 
-    // 2. Listen to master Inventaire (Bidon d'Huile)
+    // 2. Listen to master Inventaire (Bidon d'Huile) and Company Inventories
     const unsubInv = onSnapshot(collection(db, 'inventory'), (snapshot) => {
       let mainItem: InventoryItem | null = null;
+      const compInvs: Record<string, { quantity: number; minStockAlert: number; updatedAt: any }> = {};
+
       snapshot.forEach((docSnap) => {
         if (docSnap.id === 'bidon_huile') {
           const data = docSnap.data();
@@ -101,6 +106,14 @@ export default function AdminPanel({ adminUser }: AdminPanelProps) {
             name: data.name || "Bidon d'huile",
             quantity: Number(data.quantity ?? 0),
             minStockAlert: Number(data.minStockAlert ?? 30),
+            updatedAt: data.updatedAt,
+          };
+        } else if (docSnap.id.startsWith('bidon_huile_company_')) {
+          const data = docSnap.data();
+          const compId = docSnap.id.replace('bidon_huile_', '');
+          compInvs[compId] = {
+            quantity: Number(data.quantity ?? 0),
+            minStockAlert: Number(data.minStockAlert ?? 15),
             updatedAt: data.updatedAt,
           };
         }
@@ -113,6 +126,7 @@ export default function AdminPanel({ adminUser }: AdminPanelProps) {
         setInventory(mainItem);
         setMinAlertVal((mainItem as InventoryItem).minStockAlert);
       }
+      setCompanyInventories(compInvs);
     }, (err) => {
       handleFirestoreError(err, OperationType.LIST, 'inventory');
     });
@@ -391,14 +405,14 @@ export default function AdminPanel({ adminUser }: AdminPanelProps) {
     }
   };
 
-  // 4. Distribute stock to a Customer (which automatically subtracts quantity in total stock)
+  // 4. Distribute stock to a Company
   const handleDistributeToClient = async (e: React.FormEvent) => {
     e.preventDefault();
     setActionError(null);
     setActionSuccess(null);
 
     if (!selectedClientForAssign) {
-      setActionError("Veuillez sélectionner un client bénéficiaire.");
+      setActionError("Veuillez sélectionner une compagnie bénéficiaire.");
       return;
     }
 
@@ -408,19 +422,9 @@ export default function AdminPanel({ adminUser }: AdminPanelProps) {
       return;
     }
 
-    if (!inventory) {
-      setActionError("L'inventaire central n'est pas chargé.");
-      return;
-    }
-
-    if (inventory.quantity < qty) {
-      setActionError(`Rupture de Stock Imminente ! Impossible de distribuer ${qty} bidons. Stock central actuellement disponible : ${inventory.quantity}.`);
-      return;
-    }
-
-    const targetClient = users.find(u => u.uid === selectedClientForAssign);
-    if (!targetClient) {
-      setActionError("Impossible de trouver les données de ce client.");
+    const targetCompany = companies.find(c => c.id === selectedClientForAssign);
+    if (!targetCompany) {
+      setActionError("Impossible de trouver les données de cette compagnie.");
       return;
     }
 
@@ -428,19 +432,10 @@ export default function AdminPanel({ adminUser }: AdminPanelProps) {
     const batch = writeBatch(db);
 
     try {
-      // Step A: Subtract from master inventory
-      const masterInvRef = doc(db, 'inventory', 'bidon_huile');
-      batch.update(masterInvRef, {
-        quantity: inventory.quantity - qty,
-        updatedAt: serverTimestamp(),
-      });
-
-      // Step B: Write or update the Client Stock allocation
-      // Unique document ID is of the pattern: clientUserId
-      const clientStockId = `bidon_huile_${targetClient.uid}`;
+      // Step A: Write or update the Client Stock allocation tracking
+      const clientStockId = `bidon_huile_${targetCompany.id}`;
       const clientStockRef = doc(db, 'clientStocks', clientStockId);
 
-      // Verify if document already exists to accumulate delivered quantities
       const existingSnap = await getDoc(clientStockRef);
       if (existingSnap.exists()) {
         const snapData = existingSnap.data();
@@ -449,14 +444,13 @@ export default function AdminPanel({ adminUser }: AdminPanelProps) {
 
         batch.update(clientStockRef, {
           assignedQuantity: currentAssigned + qty,
-          currentStock: currentRemaining + qty, // When delivering, add the amount directly to their inventory count
+          currentStock: currentRemaining + qty,
           lastUpdated: serverTimestamp(),
         });
       } else {
-        // Document does not exist, initialize it
         batch.set(clientStockRef, {
-          clientId: targetClient.uid,
-          clientName: targetClient.name,
+          clientId: targetCompany.id,
+          clientName: targetCompany.name,
           articleId: 'bidon_huile',
           articleName: "Bidon d'huile",
           assignedQuantity: qty,
@@ -465,15 +459,34 @@ export default function AdminPanel({ adminUser }: AdminPanelProps) {
         });
       }
 
+      // Step B: ALSO update the Company's actual central inventory under inventory/bidon_huile_${companyId}!
+      const companyInvId = `bidon_huile_${targetCompany.id}`;
+      const companyInvRef = doc(db, 'inventory', companyInvId);
+      const companyInvSnap = await getDoc(companyInvRef);
+      if (companyInvSnap.exists()) {
+        const currentCompanyQty = Number(companyInvSnap.data().quantity ?? 0);
+        batch.update(companyInvRef, {
+          quantity: currentCompanyQty + qty,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        batch.set(companyInvRef, {
+          name: `Bidons d'huile (Stock Central - ${targetCompany.name})`,
+          quantity: qty,
+          minStockAlert: 15,
+          updatedAt: serverTimestamp(),
+        });
+      }
+
       // Step C: Push record to auditLogs path
       const logId = `log_${Date.now()}`;
       const auditLogRef = doc(db, 'auditLogs', logId);
       batch.set(auditLogRef, {
         type: 'distribute_client',
-        articleName: inventory.name,
+        articleName: "Bidon d'huile",
         quantity: qty,
-        clientId: targetClient.uid,
-        clientName: targetClient.name,
+        clientId: targetCompany.id,
+        clientName: targetCompany.name,
         operatorEmail: adminUser.email,
         timestamp: serverTimestamp(),
       });
@@ -481,7 +494,7 @@ export default function AdminPanel({ adminUser }: AdminPanelProps) {
       // Commit changes atomically
       await batch.commit();
 
-      setActionSuccess(`Distribution réussie : ${qty} bidons d'huile envoyés chez ${targetClient.name}. Le stock central a calculé automatiquement la déduction (-${qty}).`);
+      setActionSuccess(`Attribution réussie : ${qty} bidons d'huile alloués de plein droit à la compagnie ${targetCompany.name}.`);
       setSelectedClientForAssign('');
       setAssignQty(20);
     } catch (err: any) {
@@ -495,6 +508,28 @@ export default function AdminPanel({ adminUser }: AdminPanelProps) {
   const pendingPersonalUsers = users.filter((u) => !u.approved && u.role === 'client' && u.accountType !== 'compagnie');
   const pendingCompanyRequests = companyRequests.filter((r) => r.status === 'pending');
   const approvedClients = users.filter((u) => u.approved && u.role === 'client');
+
+  const companyStocks = companies.map(company => {
+    const compId = company.id;
+    const inv = companyInventories[compId];
+    const cStock = clientStocks.find(cs => cs.clientId === compId);
+    
+    // Current stock from the company's actual real-time inventory doc
+    const currentStock = inv ? inv.quantity : (cStock ? cStock.currentStock : 0);
+    
+    // Total historical units assigned/delivered by Super Admin
+    const assignedQuantity = cStock ? cStock.assignedQuantity : currentStock;
+
+    return {
+      id: `bidon_huile_${compId}`,
+      clientId: compId,
+      clientName: company.name,
+      articleName: "Bidon d'huile",
+      assignedQuantity,
+      currentStock,
+      lastUpdated: inv ? inv.updatedAt : (cStock ? cStock.lastUpdated : null),
+    };
+  });
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6" id="inventone-admin-panel">
@@ -536,50 +571,48 @@ export default function AdminPanel({ adminUser }: AdminPanelProps) {
 
       {/* Top statistics overview rows (Bento styled grid) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4" id="admin-bento-stats">
-        {/* Core Stock Indicator */}
+        {/* Core Stock Indicator -> Replaced with Users (Employees with email login) as requested */}
         <div className="bg-white border border-slate-200 p-4 rounded-lg flex items-center gap-3.5 shadow-sm" id="stat-main">
-          <div className="bg-blue-50 text-blue-600 p-2.5 rounded border border-blue-105">
-            <Package className="h-5.5 w-5.5" />
+          <div className="bg-violet-50 text-violet-600 p-2.5 rounded border border-violet-100">
+            <Users className="h-5.5 w-5.5" />
           </div>
           <div>
-            <span className="text-slate-500 text-[10px] font-sans font-bold tracking-wider uppercase block">Stock Central</span>
+            <span className="text-slate-500 text-[10px] font-sans font-bold tracking-wider uppercase block">Employés Partenaires</span>
             <div className="flex items-baseline gap-1.5">
               <span className="text-xl font-sans font-extrabold text-[#0f172a]">
-                {inventory ? inventory.quantity : '...'}
+                {users.filter(u => u.role === 'client' && !u.loginId).length}
               </span>
-              <span className="text-[11px] text-slate-400 font-mono font-medium">bidons</span>
+              <span className="text-[11px] text-slate-400 font-mono font-medium">employés</span>
             </div>
-            {inventory && inventory.quantity <= inventory.minStockAlert ? (
-              <span className="inline-flex items-center gap-1 text-[9px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-250 mt-1 animate-pulse">
-                <AlertTriangle className="h-2.5 w-2.5" /> Seuil critique
-              </span>
-            ) : (
-              <span className="text-[9px] text-emerald-600 font-sans font-bold block mt-1">Stock sécurisé ✓</span>
-            )}
+            <span className="text-[9px] text-slate-400 font-mono font-semibold block mt-1">
+              Approuvés : {users.filter(u => u.role === 'client' && !u.loginId && u.approved).length} | En attente : {users.filter(u => u.role === 'client' && !u.loginId && !u.approved).length}
+            </span>
           </div>
         </div>
 
-        {/* Client Alerts Flag */}
-        <div className="bg-white border border-slate-200 p-4 rounded-lg flex items-center gap-3.5 shadow-sm" id="stat-alerts">
-          <div className="bg-amber-50 text-amber-600 p-2.5 rounded border border-amber-105">
-            <Bell className="h-5.5 w-5.5" />
+        {/* Collaborators Count (with unique Login ID) as requested */}
+        <div className="bg-white border border-slate-200 p-4 rounded-lg flex items-center gap-3.5 shadow-sm" id="stat-collaborators">
+          <div className="bg-blue-50 text-blue-600 p-2.5 rounded border border-blue-100">
+            <Fingerprint className="h-5.5 w-5.5" />
           </div>
           <div>
-            <span className="text-slate-500 text-[10px] font-sans font-bold tracking-wider uppercase block">Alertes Ruptures</span>
+            <span className="text-slate-500 text-[10px] font-sans font-bold tracking-wider uppercase block">Collaborateurs Dépôts</span>
             <div className="flex items-baseline gap-1.5">
               <span className="text-xl font-sans font-extrabold text-[#0f172a]">
-                {clientStocks.filter(cs => cs.currentStock <= 5).length}
+                {users.filter(u => u.role === 'client' && u.loginId).length}
               </span>
-              <span className="text-[11px] text-slate-400 font-mono font-medium">alertes</span>
+              <span className="text-[11px] text-slate-400 font-mono font-medium">collaborateurs</span>
             </div>
-            <span className="text-[9px] text-slate-400 font-mono font-semibold block mt-1">Seuil client &lt;= 5 bidons</span>
+            <span className="text-[9px] text-slate-400 font-mono font-semibold block mt-1">
+              Connectés via Identifiant unique (ID)
+            </span>
           </div>
         </div>
 
         {/* Users Pending Approvals Count */}
         <div className="bg-white border border-slate-200 p-4 rounded-lg flex items-center gap-3.5 shadow-sm" id="stat-approvals">
-          <div className="bg-blue-50 text-blue-600 p-2.5 rounded border border-blue-105">
-            <UserCheck className="h-5.5 w-5.5" />
+          <div className="bg-amber-50 text-amber-600 p-2.5 rounded border border-amber-105">
+            <Bell className="h-5.5 w-5.5" />
           </div>
           <div>
             <span className="text-slate-500 text-[10px] font-sans font-bold tracking-wider uppercase block">Inscriptions</span>
@@ -593,20 +626,22 @@ export default function AdminPanel({ adminUser }: AdminPanelProps) {
           </div>
         </div>
 
-        {/* Total Active Clients */}
+        {/* Total Active Clients with alert indicators inside subtext */}
         <div className="bg-white border border-slate-200 p-4 rounded-lg flex items-center gap-3.5 shadow-sm" id="stat-clients">
           <div className="bg-emerald-50 text-emerald-600 p-2.5 rounded border border-emerald-105">
-            <Users className="h-5.5 w-5.5" />
+            <Truck className="h-5.5 w-5.5" />
           </div>
           <div>
-            <span className="text-slate-500 text-[10px] font-sans font-bold tracking-wider uppercase block">Clients Actifs</span>
+            <span className="text-slate-500 text-[10px] font-sans font-bold tracking-wider uppercase block">Compagnies Partenaires</span>
             <div className="flex items-baseline gap-1.5">
               <span className="text-xl font-sans font-extrabold text-[#0f172a]">
-                {approvedClients.length}
+                {companies.length}
               </span>
-              <span className="text-[11px] text-slate-400 font-mono font-medium">comptes</span>
+              <span className="text-[11px] text-slate-400 font-mono font-medium">compagnies</span>
             </div>
-            <span className="text-[9px] text-slate-400 font-mono font-semibold block mt-1">Approuvés pour livraison</span>
+            <span className="text-[9px] text-slate-400 font-mono font-semibold block mt-1">
+              Alerte Seuil (&lt;=5L) : <strong className="text-rose-600">{companyStocks.filter(cs => cs.currentStock <= 5).length} en rupture</strong>
+            </span>
           </div>
         </div>
       </div>
@@ -617,103 +652,6 @@ export default function AdminPanel({ adminUser }: AdminPanelProps) {
         {/* LEFT COLUMN (Control stock, Approvals, Deliveries) -> 7cols */}
         <div className="lg:col-span-7 space-y-6">
           
-          {/* Section 1: Stock Central Management */}
-          <section className="bg-white border border-slate-200 rounded-lg p-5 shadow-sm" id="master-stock-section">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
-              <div className="flex items-center gap-2">
-                <Fuel className="h-4.5 w-4.5 text-blue-600" />
-                <h2 className="text-sm font-sans font-extrabold text-[#0f172a] uppercase tracking-wider">Gestion de Stock Central</h2>
-              </div>
-              {inventory && (
-                <span className="text-[10px] font-mono text-slate-400">
-                  MAJ : {inventory.updatedAt ? new Date(inventory.updatedAt.seconds * 1000).toLocaleString('fr-FR', {dateStyle: 'short', timeStyle: 'short'}) : 'Non renseigné'}
-                </span>
-              )}
-            </div>
-
-            {inventory ? (
-              <div className="space-y-5">
-                <div className="bg-slate-50 p-4 rounded border border-slate-200 flex justify-between items-center">
-                  <div>
-                    <span className="text-[9px] text-slate-400 font-mono tracking-wider block uppercase font-bold">ARTICLE ENREGISTRÉ</span>
-                    <span className="text-sm font-sans font-bold text-slate-800">{inventory.name}</span>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-[9px] text-slate-400 font-mono tracking-wider block uppercase font-bold">STOCK DISPONIBLE</span>
-                    <span className="text-xl font-sans font-extrabold text-blue-750">{inventory.quantity} bidons</span>
-                  </div>
-                </div>
-
-                {/* Operations Form */}
-                <div className="space-y-3">
-                  <label className="text-[11px] font-sans font-bold text-slate-700 uppercase tracking-wide block">Ajuster la quantité de l'article</label>
-                  <div className="flex items-center gap-2">
-                    <div className="w-1/4">
-                      <input 
-                        type="number" 
-                        min="1"
-                        value={stockModifyQty}
-                        onChange={(e) => setStockModifyQty(Math.max(1, parseInt(e.target.value) || 0))}
-                        className="w-full h-9 bg-slate-50 border border-slate-250 font-sans text-slate-900 focus:border-blue-600 focus:bg-white focus:ring-1 focus:ring-blue-600/10 rounded text-center text-xs font-bold"
-                        id="adjust-qty-input"
-                      />
-                    </div>
-                    <div className="flex-1 flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleModifyMasterStock(true)}
-                        disabled={loading}
-                        className="flex-1 h-9 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-sans font-bold text-xs uppercase tracking-wider rounded flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-sm"
-                        id="btn-increment-stock"
-                      >
-                        <Plus className="h-3.5 w-3.5" /> Ajouter
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleModifyMasterStock(false)}
-                        disabled={loading}
-                        className="flex-1 h-9 bg-white hover:bg-slate-50 disabled:opacity-50 text-slate-700 font-sans font-bold text-xs uppercase tracking-wider rounded flex items-center justify-center gap-1.5 cursor-pointer transition-all border border-slate-200 shadow-sm"
-                        id="btn-decrement-stock"
-                      >
-                        <Minus className="h-3.5 w-3.5" /> Retirer
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Critical warning threshold adjustments */}
-                <div className="pt-4 border-t border-slate-100 space-y-3">
-                  <div className="flex justify-between items-center gap-4">
-                    <div className="flex-1 space-y-0.5">
-                      <label className="text-[11px] font-sans font-bold text-slate-700 uppercase tracking-wide block">Seuil d'alerte critique</label>
-                      <p className="text-[10px] text-slate-400 font-medium leading-normal">Déclenche une alerte si le stock central devient inférieur à ce nombre de bidons.</p>
-                    </div>
-                    <div className="w-[124px] flex gap-1.5 items-center">
-                      <input 
-                        type="number" 
-                        min="0"
-                        value={minAlertVal}
-                        onChange={(e) => setMinAlertVal(Math.max(0, parseInt(e.target.value) || 0))}
-                        className="w-16 h-8 bg-slate-50 border border-slate-250 text-slate-900 font-sans text-center rounded text-xs font-semibold"
-                        id="alert-threshold-input"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleUpdateAlertThreshold}
-                        className="h-8 px-2.5 bg-slate-50 hover:bg-slate-100 text-slate-700 text-[10px] font-bold uppercase tracking-wider rounded border border-slate-200 transition-all cursor-pointer shadow-inner"
-                        id="btn-save-threshold"
-                      >
-                        Sauver
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="py-6 text-center text-xs text-slate-400 font-mono animate-pulse">Chargement de l'inventaire central de bidons...</div>
-            )}
-          </section>
-
           {/* Section 2: Account Approvals */}
           <section className="bg-white border border-slate-200 rounded-lg p-5 shadow-sm" id="approvals-section">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 mb-4 border-b border-slate-100">
@@ -853,20 +791,20 @@ export default function AdminPanel({ adminUser }: AdminPanelProps) {
           <section className="bg-white border border-slate-200 rounded-lg p-5 shadow-sm" id="distribution-section">
             <div className="flex items-center gap-2 pb-3 mb-4 border-b border-slate-100">
               <Truck className="h-4.5 w-4.5 text-blue-600" />
-              <h2 className="text-sm font-sans font-extrabold text-[#0f172a] uppercase tracking-wider">Livraison & Attributions Client</h2>
+              <h2 className="text-sm font-sans font-extrabold text-[#0f172a] uppercase tracking-wider">Livraison & Attributions Compagnie</h2>
             </div>
 
-            {approvedClients.length === 0 ? (
+            {companies.length === 0 ? (
               <div className="py-5 text-center text-xs text-slate-400 font-mono bg-[#f8fafc] rounded border border-slate-200 border-dashed">
-                Aucun client approuvé disponible pour recevoir la distribution.
+                Aucune compagnie partenaire de disponible pour recevoir la distribution.
               </div>
             ) : (
               <form onSubmit={handleDistributeToClient} className="space-y-4" id="distribution-form">
-                <p className="text-xs text-slate-500 font-medium">Distribuez directement le produit à un client approuvé. Le volume sera déduit du stock central du dépôt.</p>
+                <p className="text-xs text-slate-500 font-medium">Distribuez directement le produit à une compagnie active. Le volume sera déduit du stock central du dépôt.</p>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-1">
-                    <label className="text-[11px] font-sans font-bold text-slate-700 uppercase tracking-wide block">Choisir un Client</label>
+                    <label className="text-[11px] font-sans font-bold text-slate-700 uppercase tracking-wide block">Choisir une Compagnie</label>
                     <select
                       required
                       value={selectedClientForAssign}
@@ -874,10 +812,10 @@ export default function AdminPanel({ adminUser }: AdminPanelProps) {
                       className="w-full h-9 bg-slate-50 border border-slate-200 text-slate-800 px-2.5 py-1 text-xs rounded font-sans focus:border-blue-600 focus:bg-white"
                       id="select-client"
                     >
-                      <option value="">-- Sélectionner un Client --</option>
-                      {approvedClients.map((client) => (
-                        <option key={client.uid} value={client.uid}>
-                          {client.name} {client.companyName ? `[${client.companyName}]` : ''} ({client.email})
+                      <option value="">-- Sélectionner une Compagnie --</option>
+                      {companies.map((comp) => (
+                        <option key={comp.id} value={comp.id}>
+                          {comp.name} ({comp.address})
                         </option>
                       ))}
                     </select>
@@ -908,7 +846,6 @@ export default function AdminPanel({ adminUser }: AdminPanelProps) {
               </form>
             )}
           </section>
-
         </div>
 
         {/* RIGHT COLUMN (Ravitaillement/Client Stock checking, Audit logs) -> 5cols */}
@@ -918,18 +855,18 @@ export default function AdminPanel({ adminUser }: AdminPanelProps) {
           <section className="bg-white border border-slate-200 rounded-lg p-5 shadow-sm" id="client-monitoring-section">
             <div className="flex items-center gap-2 pb-3 mb-4 border-b border-slate-100">
               <TrendingDown className="h-4.5 w-4.5 text-blue-600" />
-              <h2 className="text-sm font-sans font-extrabold text-[#0f172a] uppercase tracking-wider">Suivi d'Inventaire des Clients</h2>
+              <h2 className="text-sm font-sans font-extrabold text-[#0f172a] uppercase tracking-wider">Suivi d'Inventaire des Compagnies</h2>
             </div>
             
-            <p className="text-xs text-slate-500 mb-4 font-medium">Liste des volumes restants auto-signalés par vos clients dans leur interface. Ravitaillez-les avant la rupture de stock réelle.</p>
+            <p className="text-xs text-slate-500 mb-4 font-medium">Liste des volumes restants des dépôts centraux de vos compagnies partenaires. Ravitaillez-les avant la rupture de stock réelle.</p>
 
-            {clientStocks.length === 0 ? (
+            {companyStocks.length === 0 ? (
               <div className="py-6 text-center text-xs text-slate-400 font-mono bg-[#f8fafc] rounded border border-dashed border-slate-200">
-                Aucun rapport de stock client enregistré pour le moment.
+                Aucun rapport de stock de compagnie pour le moment.
               </div>
             ) : (
               <div className="space-y-4">
-                {clientStocks.map((cStock) => {
+                {companyStocks.map((cStock) => {
                   const criticalLevel = cStock.currentStock <= 5;
                   const percentLeft = cStock.assignedQuantity > 0 
                     ? Math.round((cStock.currentStock / cStock.assignedQuantity) * 100) 

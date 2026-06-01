@@ -79,3 +79,15 @@ export interface AuditLog {
   operatorEmail: string;
   timestamp: any;
 }
+
+export interface StockRequest {
+  id: string;
+  clientId: string;
+  clientName: string;
+  companyId: string;
+  articleId: string;
+  articleName: string;
+  requestedQuantity: number;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: any;
+}

@@ -17,9 +17,11 @@ import {
   writeBatch, 
   serverTimestamp, 
   collection,
-  deleteDoc
+  deleteDoc,
+  query,
+  where
 } from 'firebase/firestore';
-import { User, InventoryItem, ClientStock } from '../types';
+import { User, InventoryItem, ClientStock, AuditLog, StockRequest } from '../types';
 import { 
   Building2, 
   Fuel, 
@@ -46,7 +48,10 @@ import {
   UserPlus,
   Edit,
   X,
-  Save
+  Save,
+  Search,
+  Calendar,
+  Filter
 } from 'lucide-react';
 
 interface CompanyDashboardProps {
@@ -88,6 +93,14 @@ export default function CompanyDashboard({ companyUser }: CompanyDashboardProps)
 
   // Collaborator to delete confirmation modal
   const [collabToDelete, setCollabToDelete] = useState<User | null>(null);
+
+  // Distribution/Operation audit records
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [logSearchQuery, setLogSearchQuery] = useState('');
+  const [logFilterDate, setLogFilterDate] = useState('');
+
+  // Stock requests addressed to this company
+  const [stockRequests, setStockRequests] = useState<StockRequest[]>([]);
 
   const myCompanyId = companyUser.companyId || `company_${companyUser.uid}`;
   const myInventoryDocId = `bidon_huile_${myCompanyId}`;
@@ -194,6 +207,106 @@ export default function CompanyDashboard({ companyUser }: CompanyDashboardProps)
     return () => unsub();
   }, []);
 
+  // 4. Subscribe to Audit Logs
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'auditLogs'), (snapshot) => {
+      const list: AuditLog[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        list.push({
+          id: docSnap.id,
+          type: data.type || 'add_stock',
+          articleName: data.articleName || "Bidon d'huile",
+          quantity: Number(data.quantity || 0),
+          clientId: data.clientId,
+          clientName: data.clientName,
+          operatorEmail: data.operatorEmail || '',
+          timestamp: data.timestamp,
+        });
+      });
+      setAuditLogs(list);
+    }, (err) => {
+      console.error("Erreur direct logs :", err);
+    });
+
+    return () => unsub();
+  }, []);
+
+  // 5. Subscribe to Stock Requests addressed to this company
+  useEffect(() => {
+    const q = query(
+      collection(db, 'stockRequests'),
+      where('companyId', '==', myCompanyId)
+    );
+
+    const unsub = onSnapshot(q, (snapshot) => {
+      const list: StockRequest[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        list.push({
+          id: docSnap.id,
+          clientId: data.clientId || '',
+          clientName: data.clientName || '',
+          companyId: data.companyId || '',
+          articleId: data.articleId || 'bidon_huile',
+          articleName: data.articleName || "Bidon d'huile",
+          requestedQuantity: Number(data.requestedQuantity ?? 0),
+          status: data.status || 'pending',
+          createdAt: data.createdAt,
+        });
+      });
+      // Sort by descending createdAt
+      list.sort((a, b) => {
+        const tA = a.createdAt?.seconds || 0;
+        const tB = b.createdAt?.seconds || 0;
+        return tB - tA;
+      });
+      setStockRequests(list);
+    }, (err) => {
+      console.error("Error subscribing to company stock requests:", err);
+    });
+
+    return () => unsub();
+  }, [myCompanyId]);
+
+  // Filter audits for this company
+  const companyAuditLogs = auditLogs.filter(log => {
+    const belongsToCompany = log.operatorEmail === companyUser.email || 
+      (log.clientId && myClients.some(mc => mc.uid === log.clientId));
+    
+    if (!belongsToCompany) return false;
+
+    if (logSearchQuery) {
+      const query = logSearchQuery.toLowerCase();
+      const clientMatches = log.clientName?.toLowerCase().includes(query) || false;
+      const operatorMatches = log.operatorEmail.toLowerCase().includes(query);
+      const articleMatches = log.articleName?.toLowerCase().includes(query) || false;
+      if (!clientMatches && !operatorMatches && !articleMatches) return false;
+    }
+
+    if (logFilterDate) {
+      if (!log.timestamp) return false;
+      const logDate = new Date(log.timestamp.seconds * 1000);
+      const filterDate = new Date(logFilterDate);
+      
+      const isSameDay = logDate.getUTCFullYear() === filterDate.getUTCFullYear() &&
+                        logDate.getUTCMonth() === filterDate.getUTCMonth() &&
+                        logDate.getUTCDate() === filterDate.getUTCDate();
+      
+      const isSameLocalDay = logDate.getFullYear() === filterDate.getFullYear() &&
+                             logDate.getMonth() === filterDate.getMonth() &&
+                             logDate.getDate() === filterDate.getDate();
+
+      if (!isSameDay && !isSameLocalDay) return false;
+    }
+
+    return true;
+  }).sort((a, b) => {
+    const tA = a.timestamp?.seconds || 0;
+    const tB = b.timestamp?.seconds || 0;
+    return tB - tA;
+  });
+
   // Filter out client stocks belonging only to MY clients
   const companyClientStocks = allClientStocks.filter(cs => 
     myClients.some(mc => mc.uid === cs.clientId)
@@ -287,11 +400,16 @@ export default function CompanyDashboard({ companyUser }: CompanyDashboardProps)
       return;
     }
 
-    const targetClient = myClients.find(c => c.uid === selectedClientForAssign);
-    if (!targetClient) {
+    const targetClientStock = companyClientStocks.find(s => s.clientId === selectedClientForAssign);
+    if (!targetClientStock) {
       setActionError("Veuillez sélectionner un client rattaché valide.");
       return;
     }
+
+    const targetClient = {
+      uid: targetClientStock.clientId,
+      name: targetClientStock.clientName,
+    };
 
     setLoadingAction(true);
     const batch = writeBatch(db);
@@ -350,6 +468,106 @@ export default function CompanyDashboard({ companyUser }: CompanyDashboardProps)
     } catch (err: any) {
       console.error("Assign stock exception :", err);
       setActionError(err.message || "Erreur de distribution.");
+    } finally {
+      setLoadingAction(false);
+    }
+  };
+
+  // Handle Approving of client stock requests (including executing deliveries safely)
+  const handleApproveRequest = async (req: StockRequest) => {
+    setActionError(null);
+    setActionSuccess(null);
+
+    if (!inventory) {
+      setActionError("L'inventaire central de la compagnie est indisponible.");
+      return;
+    }
+
+    if (inventory.quantity < req.requestedQuantity) {
+      setActionError(`Stock insuffisant ! Le stock central de votre compagnie (${inventory.quantity} bidons) est insuffisant pour approuver et livrer ${req.requestedQuantity} bidons.`);
+      return;
+    }
+
+    setLoadingAction(true);
+    const batch = writeBatch(db);
+
+    try {
+      // 1. Update stock request status to approved
+      const reqRef = doc(db, 'stockRequests', req.id);
+      batch.update(reqRef, {
+        status: 'approved',
+      });
+
+      // 2. Subtract from company central inventory
+      const compInvRef = doc(db, 'inventory', myInventoryDocId);
+      batch.update(compInvRef, {
+        quantity: inventory.quantity - req.requestedQuantity,
+        updatedAt: serverTimestamp(),
+      });
+
+      // 3. Update Client Stock registry
+      const clientStockId = `bidon_huile_${req.clientId}`;
+      const clientStockRef = doc(db, 'clientStocks', clientStockId);
+
+      const existingSnap = await getDoc(clientStockRef);
+      if (existingSnap.exists()) {
+        const snapData = existingSnap.data();
+        const currentAssigned = Number(snapData.assignedQuantity ?? 0);
+        const currentRemaining = Number(snapData.currentStock ?? 0);
+
+        batch.update(clientStockRef, {
+          assignedQuantity: currentAssigned + req.requestedQuantity,
+          currentStock: currentRemaining + req.requestedQuantity,
+          lastUpdated: serverTimestamp(),
+        });
+      } else {
+        batch.set(clientStockRef, {
+          clientId: req.clientId,
+          clientName: req.clientName,
+          articleId: 'bidon_huile',
+          articleName: "Bidon d'huile",
+          assignedQuantity: req.requestedQuantity,
+          currentStock: req.requestedQuantity,
+          lastUpdated: serverTimestamp(),
+        });
+      }
+
+      // 4. Log in AuditLogs
+      const logRef = doc(collection(db, 'auditLogs'));
+      batch.set(logRef, {
+        type: 'distribute_client',
+        articleName: inventory.name,
+        quantity: req.requestedQuantity,
+        clientId: req.clientId,
+        clientName: req.clientName,
+        operatorEmail: companyUser.email,
+        timestamp: serverTimestamp(),
+      });
+
+      await batch.commit();
+      setActionSuccess(`Demande acceptée ! ${req.requestedQuantity} bidon(s) d'huile livré(s) à ${req.clientName}.`);
+    } catch (err: any) {
+      console.error("Approve request exception:", err);
+      setActionError(err.message || "Erreur de validation de demande.");
+    } finally {
+      setLoadingAction(false);
+    }
+  };
+
+  const handleRejectRequest = async (req: StockRequest) => {
+    setActionError(null);
+    setActionSuccess(null);
+    setLoadingAction(true);
+
+    try {
+      const reqRef = doc(db, 'stockRequests', req.id);
+      await updateDoc(reqRef, {
+        status: 'rejected',
+      });
+      setActionSuccess(`Demande de ${req.requestedQuantity} bidons par ${req.clientName} rejetée avec succès.`);
+    } catch (err: any) {
+      console.error("Reject request exception:", err);
+      setActionError(err.message || "Erreur de rejet de demande.");
     } finally {
       setLoadingAction(false);
     }
@@ -576,6 +794,41 @@ export default function CompanyDashboard({ companyUser }: CompanyDashboardProps)
           <div className="text-[10px] text-slate-500 font-mono mt-0.5">{companyUser.email}</div>
         </div>
       </div>
+
+      {/* Real-time stock status alert for low-stock collaborators */}
+      {!loading && companyClientStocks.some(s => s.currentStock <= 5) && (
+        <div className="bg-rose-50 border border-rose-205 rounded-lg p-4 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4" id="collaborators-stock-critical-alert">
+          <div className="flex items-start gap-3">
+            <div className="bg-rose-100 text-rose-600 p-2 rounded-lg border border-rose-200 mt-0.5 md:mt-0 shrink-0">
+              <AlertTriangle className="h-5 w-5 text-rose-600 animate-bounce" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-xs sm:text-sm font-sans font-extrabold text-rose-950 uppercase tracking-wide flex items-center gap-1.5">
+                Alerte de Stock Approchant ou Sous le Seuil
+              </h3>
+              <p className="text-[11px] sm:text-xs text-rose-800 font-medium leading-relaxed">
+                Plusieurs collaborateurs ou clients ont atteint le seuil d'alerte critique (<strong className="font-bold">5 bidons ou moins</strong>). Attribuez-leur du stock dès que possible pour éviter la rupture complète de leur distribution locale.
+              </p>
+              
+              {/* List of collaborators in alert with status indicators */}
+              <div className="flex flex-wrap gap-2 pt-1.5">
+                {companyClientStocks.filter(s => s.currentStock <= 5).map(s => (
+                  <span key={s.id} className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-white text-rose-900 border border-rose-200 shadow-2xs">
+                    <span className="h-1.5 w-1.5 rounded-full bg-rose-600 animate-pulse" />
+                    {s.clientName} : <strong className="font-extrabold">{s.currentStock} bidon(s)</strong>
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+          
+          <div className="w-full md:w-auto shrink-0 flex items-center md:justify-end text-right">
+            <span className="text-[10px] sm:text-xs font-mono font-bold text-rose-800 bg-rose-100/80 px-2.5 py-1 rounded-md border border-rose-200 uppercase whitespace-nowrap">
+              {companyClientStocks.filter(s => s.currentStock <= 5).length} alerte(s) active(s)
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Loading feedback */}
       {loading ? (
@@ -843,6 +1096,86 @@ export default function CompanyDashboard({ companyUser }: CompanyDashboardProps)
               )}
             </div>
 
+            {/* INCOMING STOCK REQUESTS REVIEW WORKSPACE */}
+            <div className="bg-white border border-slate-200 rounded-lg p-3.5 sm:p-5 shadow-sm space-y-4" id="company-stock-requests">
+              <div className="flex items-center gap-2 pb-3 border-b border-slate-100">
+                <Bell className="h-4.5 w-4.5 text-indigo-600 animate-pulse" />
+                <h3 className="text-xs sm:text-sm font-sans font-extrabold text-[#0f172a] uppercase tracking-wider">Demandes de Ravitaillement Clients</h3>
+                {stockRequests.filter(r => r.status === 'pending').length > 0 && (
+                  <span className="bg-amber-550 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full animate-bounce">
+                    {stockRequests.filter(r => r.status === 'pending').length} nouvelle(s)
+                  </span>
+                )}
+              </div>
+
+              {stockRequests.length === 0 ? (
+                <div className="py-6 text-center text-[11px] text-slate-400 font-sans italic bg-slate-50 border border-dashed border-slate-200 rounded">
+                  Aucune demande de ravitaillement n'a été reçue pour le moment.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse" id="requests-dashboard-table">
+                    <thead>
+                      <tr className="border-b border-slate-150 text-[9px] sm:text-[10px] uppercase font-mono text-slate-400 font-bold tracking-wider bg-slate-50">
+                        <th className="py-2 px-2">Client / Date</th>
+                        <th className="py-2 px-2 text-center">Quantité Demandée</th>
+                        <th className="py-2 px-2 text-center">Statut</th>
+                        <th className="py-2 px-2 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-xs text-slate-755">
+                      {stockRequests.map((req) => (
+                        <tr key={req.id} className="hover:bg-slate-55/50 transition-colors">
+                          <td className="py-2.5 px-2">
+                            <span className="font-bold text-slate-800 block">{req.clientName}</span>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              {req.createdAt ? new Date(req.createdAt.seconds * 1000).toLocaleString('fr-FR') : "À l'instant"}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-2 text-center font-extrabold text-slate-900">
+                            {req.requestedQuantity} bidons
+                          </td>
+                          <td className="py-2.5 px-2 text-center">
+                            {req.status === 'pending' ? (
+                              <span className="inline-flex items-center gap-1 text-[8.5px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 uppercase">En Attente</span>
+                            ) : req.status === 'approved' ? (
+                              <span className="inline-flex items-center gap-1 text-[8.5px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-250 uppercase">Acceptée</span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-[8.5px] font-bold text-rose-750 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-250 uppercase">Rejetée</span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-2 text-right space-x-1">
+                            {req.status === 'pending' ? (
+                              <div className="inline-flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  disabled={loadingAction}
+                                  onClick={() => handleApproveRequest(req)}
+                                  className="h-7 px-2.5 text-[9.5px] bg-emerald-600 hover:bg-emerald-700 text-white leading-none rounded font-sans font-bold uppercase tracking-wider cursor-pointer transition-colors shadow-sm disabled:opacity-50"
+                                >
+                                  Accepter (Livrer)
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={loadingAction}
+                                  onClick={() => handleRejectRequest(req)}
+                                  className="h-7 px-2.5 text-[9.5px] bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 leading-none rounded font-sans font-bold uppercase tracking-wider cursor-pointer transition-colors disabled:opacity-50"
+                                >
+                                  Rejeter
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-[10px] text-slate-400 font-mono italic">Traitée</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
             {/* COLLABORATOR DIRECTORY & ADDITION WORKSPACE */}
             <div className="bg-white border border-slate-200 rounded-lg p-5 shadow-sm space-y-6" id="company-collaborators-hub">
               <div className="flex items-center justify-between pb-3.5 border-b border-slate-100">
@@ -1051,6 +1384,175 @@ export default function CompanyDashboard({ companyUser }: CompanyDashboardProps)
 
             </div>
 
+            {/* Section 3: Historique des Distributions & Ajustements */}
+            <div className="bg-white border border-slate-200 rounded-lg p-5 shadow-sm space-y-4" id="company-history-card">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-slate-100">
+                <div className="flex items-center gap-2">
+                  <div className="bg-blue-50 text-blue-600 p-1.5 rounded-md border border-blue-100">
+                    <History className="h-4.5 w-4.5" />
+                  </div>
+                  <div>
+                    <h3 className="font-sans font-extrabold text-[#0f172a] text-xs uppercase tracking-wider">Historique des Distributions</h3>
+                    <p className="text-[10px] text-slate-400 font-medium">Consultez et filtrez en temps réel l'ensemble de vos transactions</p>
+                  </div>
+                </div>
+                <div className="text-right shrink-0">
+                  <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                    {companyAuditLogs.length} entrée(s) trouvée(s)
+                  </span>
+                </div>
+              </div>
+
+              {/* Advanced Search & Filtering Bars */}
+              <div className="bg-slate-50/50 p-3.5 border border-slate-200 rounded-lg flex flex-col md:flex-row items-stretch md:items-center gap-3" id="history-filters-container">
+                {/* Search query field */}
+                <div className="flex-1 relative">
+                  <span className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
+                    <Search className="h-3.5 w-3.5" />
+                  </span>
+                  <input
+                    type="text"
+                    value={logSearchQuery}
+                    onChange={(e) => setLogSearchQuery(e.target.value)}
+                    placeholder="Rechercher par membre, opérateur ou article..."
+                    className="w-full h-8.5 pl-8.5 pr-2.5 bg-white border border-slate-250 focus:border-blue-600 focus:bg-white text-slate-800 text-xs font-medium placeholder-slate-400 rounded-md transition-all shadow-3xs"
+                  />
+                </div>
+
+                {/* Date Filter Picker */}
+                <div className="w-full md:w-44 relative">
+                  <span className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
+                    <Calendar className="h-3.5 w-3.5" />
+                  </span>
+                  <input
+                    type="date"
+                    value={logFilterDate}
+                    onChange={(e) => setLogFilterDate(e.target.value)}
+                    className="w-full h-8.5 pl-8.5 pr-2.5 bg-white border border-slate-250 focus:border-blue-600 focus:bg-white text-slate-800 text-xs font-bold rounded-md transition-all shadow-3xs cursor-pointer"
+                  />
+                </div>
+
+                {/* Clear options resets */}
+                {(logSearchQuery || logFilterDate) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLogSearchQuery('');
+                      setLogFilterDate('');
+                    }}
+                    className="h-8.5 px-3 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold rounded-md border border-red-200 transition-colors shrink-0 flex items-center justify-center gap-1 cursor-pointer"
+                  >
+                    <X className="h-3 w-3" /> Réinitialiser
+                  </button>
+                )}
+              </div>
+
+              {/* Logs visual representation list */}
+              {companyAuditLogs.length === 0 ? (
+                <div className="py-10 text-center border-2 border-dashed border-slate-100 rounded-lg">
+                  <History className="h-8 w-8 text-slate-300 mx-auto mb-2 animate-pulse" />
+                  <p className="text-xs text-slate-500 font-semibold mb-0.5">Aucune transaction trouvée</p>
+                  <p className="text-[10px] text-slate-400 leading-relaxed font-medium">Modifiez vos critères de recherche ou procédez à des distributions pour charger des entrées.</p>
+                </div>
+              ) : (
+                <div className="overflow-hidden border border-slate-200 rounded-lg shadow-3xs">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse table-auto">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-100">
+                          <th className="py-2.5 px-3 text-[9px] font-sans font-bold tracking-wider text-slate-500 uppercase">Horodatage & Type</th>
+                          <th className="py-2.5 px-3 text-[9px] font-sans font-bold tracking-wider text-slate-500 uppercase">Article & Quantité</th>
+                          <th className="py-2.5 px-3 text-[9px] font-sans font-bold tracking-wider text-slate-500 uppercase">Bénéficiaire / Acteur</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-xs">
+                        {companyAuditLogs.map((log) => {
+                          const isDistribution = log.type === 'distribute_client';
+                          const isAddition = log.type === 'add_stock';
+                          
+                          // Format nice date string
+                          let logDateStr = 'Non daté';
+                          let logHourStr = '';
+                          if (log.timestamp) {
+                            const dateObj = new Date(log.timestamp.seconds * 1000);
+                            logDateStr = dateObj.toLocaleDateString('fr-FR', {
+                              day: '2-digit',
+                              month: '2-digit',
+                              year: 'numeric'
+                            });
+                            logHourStr = dateObj.toLocaleTimeString('fr-FR', {
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            });
+                          }
+
+                          return (
+                            <tr key={log.id} className="hover:bg-slate-50/50 transition-colors">
+                              {/* Timestamp and Transaction Type Badge */}
+                              <td className="py-3 px-3">
+                                <div className="space-y-1">
+                                  <div className="text-[10px] font-mono text-slate-400 flex items-center gap-1.5">
+                                    <span className="font-bold text-slate-600">{logDateStr}</span>
+                                    <span>•</span>
+                                    <span className="text-slate-405">{logHourStr}</span>
+                                  </div>
+                                  <div>
+                                    {isDistribution ? (
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-mono font-bold bg-teal-50 text-teal-700 border border-teal-200 uppercase">
+                                        <ArrowUpRight className="h-2 w-2" /> Distribution
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-mono font-bold bg-blue-50 text-blue-700 border border-blue-200 uppercase">
+                                        {isAddition ? (
+                                          <Plus className="h-2 w-2" />
+                                        ) : (
+                                          <Minus className="h-2 w-2" />
+                                        )}
+                                        Ajustement ({isAddition ? '+' : '-'})
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </td>
+
+                              {/* Target Article and Quantities with visual indicator */}
+                              <td className="py-3 px-3">
+                                <div className="space-y-0.5">
+                                  <span className="text-[11px] font-sans font-bold text-slate-800 block">{log.articleName}</span>
+                                  <div className="flex items-center gap-1">
+                                    <span className={`text-[12px] font-mono font-extrabold ${isDistribution || !isAddition ? 'text-amber-700' : 'text-emerald-700'}`}>
+                                      {isDistribution || !isAddition ? '-' : '+'}{log.quantity}
+                                    </span>
+                                    <span className="text-[10px] text-slate-400 font-mono font-medium">bidon(s)</span>
+                                  </div>
+                                </div>
+                              </td>
+
+                              {/* Beneficiary Details and Operator Account */}
+                              <td className="py-3 px-3 select-all">
+                                <div className="space-y-0.5">
+                                  {isDistribution ? (
+                                    <span className="text-[11px] font-sans font-bold text-slate-900 block truncate max-w-[200px]">
+                                      {log.clientName || 'Membre indéfini'}
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] font-mono font-bold text-slate-500 block truncate max-w-[200px]">
+                                      Opérateur d'inventaire
+                                    </span>
+                                  )}
+                                  <span className="text-[9px] text-slate-400 font-mono block select-none truncate max-w-[200px]">Par: {log.operatorEmail}</span>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+
           </div>
 
           {/* RIGHT PANELS: Stock distributor dispatcher & Help references */}
@@ -1073,15 +1575,11 @@ export default function CompanyDashboard({ companyUser }: CompanyDashboardProps)
                     className="w-full bg-[#f8fafc] text-slate-900 border border-slate-200 focus:border-blue-600 focus:bg-white text-xs font-semibold py-2 px-2.5 rounded transition-all"
                   >
                     <option value="">-- Choisir un client --</option>
-                    {myClients.map(c => {
-                      const clientStockObj = companyClientStocks.find(s => s.clientId === c.uid);
-                      const current = clientStockObj ? `${clientStockObj.currentStock} bidons restants` : 'Aucun stock actuel';
-                      return (
-                        <option key={c.uid} value={c.uid}>
-                          {c.name} ({current})
-                        </option>
-                      );
-                    })}
+                    {companyClientStocks.map(s => (
+                      <option key={s.clientId} value={s.clientId}>
+                        {s.clientName} ({s.currentStock} bidon(s) restant(s))
+                      </option>
+                    ))}
                   </select>
                 </div>
 
@@ -1104,7 +1602,7 @@ export default function CompanyDashboard({ companyUser }: CompanyDashboardProps)
 
                 <button
                   type="submit"
-                  disabled={loadingAction || myClients.length === 0}
+                  disabled={loadingAction || companyClientStocks.length === 0}
                   className="w-full h-9 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-sans font-bold text-xs uppercase tracking-wider rounded flex items-center justify-center gap-1.5 cursor-pointer shadow-sm transition-colors"
                 >
                   <ArrowRightCircle className="h-3.5 w-3.5" /> Confirmer la distribution

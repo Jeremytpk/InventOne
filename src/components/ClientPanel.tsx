@@ -5,8 +5,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { db, handleFirestoreError, OperationType } from '../firebase';
-import { doc, onSnapshot, updateDoc, setDoc, serverTimestamp, collection } from 'firebase/firestore';
-import { User, ClientStock } from '../types';
+import { doc, onSnapshot, updateDoc, setDoc, serverTimestamp, collection, query, where, deleteDoc } from 'firebase/firestore';
+import { User, ClientStock, StockRequest } from '../types';
 import CompanyDashboard from './CompanyDashboard';
 import { 
   Fuel, 
@@ -18,7 +18,10 @@ import {
   Plus,
   Minus,
   ArrowRightCircle,
-  History
+  History,
+  Send,
+  Trash2,
+  Clock
 } from 'lucide-react';
 
 interface ClientPanelProps {
@@ -31,6 +34,13 @@ export default function ClientPanel({ clientUser }: ClientPanelProps) {
   const [reportedQty, setReportedQty] = useState<number>(0);
   const [errorStr, setErrorStr] = useState<string | null>(null);
   const [successStr, setSuccessStr] = useState<string | null>(null);
+
+  // States related to Stock Requests
+  const [requestsList, setRequestsList] = useState<StockRequest[]>([]);
+  const [requestQty, setRequestQty] = useState<string>('10');
+  const [requestError, setRequestError] = useState<string | null>(null);
+  const [requestSuccess, setRequestSuccess] = useState<string | null>(null);
+  const [submittingRequest, setSubmittingRequest] = useState<boolean>(false);
 
   const isCompany = clientUser.accountType === 'compagnie';
 
@@ -69,6 +79,96 @@ export default function ClientPanel({ clientUser }: ClientPanelProps) {
 
     return () => unsub();
   }, [clientUser.uid]);
+
+  // Subscribe to own stock requests
+  useEffect(() => {
+    if (isCompany) return;
+
+    const q = query(
+      collection(db, 'stockRequests'),
+      where('clientId', '==', clientUser.uid)
+    );
+
+    const unsub = onSnapshot(q, (snapshot) => {
+      const list: StockRequest[] = [];
+      snapshot.forEach((d) => {
+        const data = d.data();
+        list.push({
+          id: d.id,
+          clientId: data.clientId || '',
+          clientName: data.clientName || '',
+          companyId: data.companyId || '',
+          articleId: data.articleId || 'bidon_huile',
+          articleName: data.articleName || "Bidon d'huile",
+          requestedQuantity: Number(data.requestedQuantity ?? 0),
+          status: data.status || 'pending',
+          createdAt: data.createdAt,
+        });
+      });
+      // Sort by descending date
+      list.sort((a, b) => {
+        const tA = a.createdAt?.seconds || 0;
+        const tB = b.createdAt?.seconds || 0;
+        return tB - tA;
+      });
+      setRequestsList(list);
+    }, (err) => {
+      handleFirestoreError(err, OperationType.GET, 'stockRequests');
+    });
+
+    return () => unsub();
+  }, [clientUser.uid, isCompany]);
+
+  // Submit a new stock request to the company
+  const handleAddNewRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRequestError(null);
+    setRequestSuccess(null);
+
+    const qty = Number(requestQty);
+    if (!qty || qty <= 0) {
+      setRequestError("Veuillez saisir une quantité supérieure à 0.");
+      return;
+    }
+
+    setSubmittingRequest(true);
+    try {
+      const requestId = `req_${Date.now()}_${clientUser.uid}`;
+      const requestRef = doc(db, 'stockRequests', requestId);
+
+      await setDoc(requestRef, {
+        clientId: clientUser.uid,
+        clientName: clientUser.name,
+        companyId: clientUser.companyId || clientUser.requestedCompanyId || 'company_global',
+        articleId: 'bidon_huile',
+        articleName: "Bidon d'huile",
+        requestedQuantity: qty,
+        status: 'pending',
+        createdAt: serverTimestamp(),
+      });
+
+      setRequestSuccess(`Demande de ${qty} bidon(s) d'huile de ravitaillement envoyée avec succès.`);
+      setRequestQty('10');
+    } catch (err: any) {
+      console.error("Error creating stock request:", err);
+      setRequestError(err.message || "Erreur de transmission de la demande.");
+    } finally {
+      setSubmittingRequest(false);
+    }
+  };
+
+  // Cancel/delete pending request
+  const handleCancelRequest = async (requestId: string) => {
+    setRequestError(null);
+    setRequestSuccess(null);
+    try {
+      await deleteDoc(doc(db, 'stockRequests', requestId));
+      setRequestSuccess("Demande de ravitaillement annulée avec succès.");
+    } catch (err: any) {
+      console.error("Cancel stock request exception :", err);
+      setRequestError(err.message || "Impossible d'annuler la demande.");
+    }
+  };
 
   // Handle reporting remaining stock to backend
   const handleReportStock = async (e: React.FormEvent) => {
@@ -282,6 +382,102 @@ export default function ClientPanel({ clientUser }: ClientPanelProps) {
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* New Stock Requests Card */}
+            <div className="bg-white border border-slate-200 rounded-lg p-4 sm:p-5 shadow-sm" id="client-requests-card">
+              <div className="flex items-center gap-2 pb-3 border-b border-slate-100 mb-4 sm:mb-5">
+                <Send className="h-4 w-4 text-indigo-600" />
+                <h2 className="text-xs sm:text-sm font-sans font-extrabold text-[#0f172a] uppercase tracking-wider">Demander du Stock (Ravitaillement)</h2>
+              </div>
+
+              {requestError && (
+                <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded mb-4 flex items-center gap-2 animate-pulse" id="request-error">
+                  <AlertTriangle className="h-4 w-4 shrink-0 text-red-650" />
+                  <span>{requestError}</span>
+                </div>
+              )}
+
+              {requestSuccess && (
+                <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded mb-4 flex items-center gap-2" id="request-success">
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-650" />
+                  <span>{requestSuccess}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleAddNewRequest} className="bg-slate-50 p-4 rounded border border-slate-205 space-y-4" id="request-stock-form">
+                <div className="space-y-1">
+                  <label htmlFor="requestQty" className="text-xs font-sans font-bold text-slate-800 uppercase tracking-wide block">Quantité de bidons demandée</label>
+                  <p className="text-[10px] text-slate-400 font-medium">Saisissez le nombre de bidons d'huile dont vous avez besoin pour vos opérations de distribution locale.</p>
+                </div>
+
+                <div className="flex gap-2 max-w-sm">
+                  <input
+                    type="number"
+                    min="1"
+                    name="requestQty"
+                    id="requestQty"
+                    value={requestQty}
+                    onChange={(e) => setRequestQty(e.target.value)}
+                    className="w-full h-9 px-3 bg-white text-slate-900 border border-slate-200 font-sans text-sm rounded shadow-sm focus:border-indigo-600 focus:outline-none"
+                    placeholder="Ex: 10"
+                    required
+                  />
+                  <button
+                    type="submit"
+                    disabled={submittingRequest}
+                    className="px-4 h-9 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-sans font-bold text-xs uppercase tracking-wider rounded flex items-center gap-1.5 shrink-0 transition-all cursor-pointer shadow-sm"
+                  >
+                    <Send className="h-3.5 w-3.5" /> {submittingRequest ? "Envoi..." : "Demander"}
+                  </button>
+                </div>
+              </form>
+
+              <div className="mt-6" id="client-requests-history">
+                <h3 className="text-xs font-sans font-bold text-slate-700 uppercase tracking-wide mb-3 flex items-center gap-1.5">
+                  <Clock className="h-3.5 w-3.5 text-slate-400" /> Historique de mes demandes
+                </h3>
+
+                {requestsList.length === 0 ? (
+                  <p className="text-[11px] text-slate-400 font-mono italic">Aucune demande de stock effectuée pour le moment.</p>
+                ) : (
+                  <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                    {requestsList.map((req) => (
+                      <div key={req.id} className="p-3 bg-slate-50 border border-slate-200 rounded flex items-center justify-between gap-3 text-xs">
+                        <div className="space-y-1">
+                          <div className="font-semibold text-slate-800">
+                            Demande de <span className="text-indigo-600 font-extrabold">{req.requestedQuantity} bidons</span> d'huile
+                          </div>
+                          <div className="text-[10px] text-slate-400 font-mono">
+                            Créée le : {req.createdAt ? new Date(req.createdAt.seconds * 1000).toLocaleString() : "À l'instant"}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          {req.status === 'pending' ? (
+                            <span className="px-2 py-0.5 text-[9px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded uppercase">En Attente</span>
+                          ) : req.status === 'approved' ? (
+                            <span className="px-2 py-0.5 text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-250 rounded uppercase">Acceptée</span>
+                          ) : (
+                            <span className="px-2 py-0.5 text-[9px] font-bold text-rose-750 bg-rose-50 border border-rose-250 rounded uppercase font-sans">Rejetée</span>
+                          )}
+
+                          {req.status === 'pending' && (
+                            <button
+                              type="button"
+                              onClick={() => handleCancelRequest(req.id)}
+                              className="p-1 text-slate-400 hover:text-red-655 transition-colors cursor-pointer"
+                              title="Annuler cette demande"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 

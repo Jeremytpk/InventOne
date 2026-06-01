@@ -140,6 +140,22 @@
         "status": { "type": "string", "enum": ["pending", "approved", "rejected"] }
       },
       "required": ["uid", "firstName", "lastName", "email", "phone", "companyName", "companyAddress", "productSold", "createdAt", "status"]
+    },
+    "StockRequest": {
+      "title": "StockRequest",
+      "description": "Demande de stock d'un client à sa compagnie ou l'administrateur.",
+      "type": "object",
+      "properties": {
+        "clientId": { "type": "string" },
+        "clientName": { "type": "string" },
+        "companyId": { "type": "string" },
+        "articleId": { "type": "string" },
+        "articleName": { "type": "string" },
+        "requestedQuantity": { "type": "integer" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["clientId", "clientName", "companyId", "articleId", "articleName", "requestedQuantity", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -166,6 +182,10 @@
     "/companyRequests/{requestId}": {
       "schema": "CompanyRequest",
       "description": "Demandes d'enregistrement de compagnies partenaires."
+    },
+    "/stockRequests/{requestId}": {
+      "schema": "StockRequest",
+      "description": "Suivi des demandes de ravitaillement ou de rechargement faites par les clients."
     }
   }
 }
