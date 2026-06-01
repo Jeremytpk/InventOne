@@ -288,9 +288,8 @@ export default function AuthScreen() {
   };
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center bg-[#f1f5f9] px-4 py-8 sm:px-6 lg:px-8" id="inventone-auth-wrapper">
-      <div className="w-full max-w-lg bg-white border border-slate-200 p-5 sm:p-8 rounded-xl shadow-md relative overflow-hidden space-y-6" id="auth-panel">
-        <div className="absolute top-0 left-0 right-0 h-[3px] bg-blue-600" />
+    <div className="relative w-full max-w-lg bg-white/95 backdrop-blur-md border border-slate-200/50 p-5 sm:p-8 rounded-xl shadow-2xl overflow-hidden space-y-6" id="auth-panel">
+      <div className="absolute top-0 left-0 right-0 h-[3px] bg-blue-600" />
 
         <div className="text-center space-y-2">
           <div className="mx-auto h-12 w-12 rounded-lg bg-blue-600 flex items-center justify-center text-white shadow-sm">
@@ -691,6 +690,5 @@ export default function AuthScreen() {
 
 
       </div>
-    </div>
   );
 }

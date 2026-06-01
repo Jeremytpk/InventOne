@@ -140,12 +140,41 @@ export default function App() {
   // 2. Authentication Form display (Login / Signup)
   if (!firebaseUser || !userData) {
     return (
-      <div className="min-h-screen bg-[#f1f5f9] text-[#0f172a] font-sans flex flex-col justify-between">
-        <Navbar currentUser={null} />
-        <main className="flex-1 flex items-center justify-center">
+      <div className="relative min-h-screen flex flex-col justify-between overflow-hidden font-sans text-slate-100" id="immersive-auth-layout">
+        {/* Background Image Matching Brand (Modern Logistics & Stock) - Covers FULL VIEWPORT */}
+        <img
+          src="https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=1920&q=80"
+          alt="InventOne Logistics & Distribution Warehouse"
+          className="absolute inset-0 w-full h-full object-cover pointer-events-none z-0"
+          referrerPolicy="no-referrer"
+        />
+        {/* Premium Backdrop Overlay with Dark Matte and Soft Blur - Covers FULL VIEWPORT */}
+        <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-[2.5px] pointer-events-none z-0" />
+
+        {/* Floating Navbar over Backdrop */}
+        <header className="relative z-10 border-b border-white/10 bg-slate-900/40 backdrop-blur-md" id="floating-navbar">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <div className="bg-blue-600 p-1.5 rounded flex items-center justify-center text-white shadow-sm">
+                <FileSignature className="h-4.5 w-4.5 text-white" />
+              </div>
+              <div>
+                <span className="font-sans font-extrabold text-lg tracking-tight text-white leading-none">
+                  InventOne
+                </span>
+                <span className="hidden sm:block font-mono text-[9px] text-slate-400 tracking-wider">LUBRICANT STOCK CONTROL</span>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        {/* Card display form */}
+        <main className="relative z-10 flex-1 flex items-center justify-center py-10 px-4 sm:px-6 lg:px-8">
           <AuthScreen />
         </main>
-        <footer className="py-4 border-t border-slate-200 text-center font-mono text-[10px] text-slate-500 bg-white shadow-inner">
+
+        {/* Transparent Elegant Footer */}
+        <footer className="relative z-10 py-4 border-t border-white/10 text-center font-mono text-[10px] text-slate-450 bg-slate-950/40 backdrop-blur-sm">
           INVENTONE PLATFORM © 2026 - TOUS DROITS RÉSERVÉS
         </footer>
       </div>
