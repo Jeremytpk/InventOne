@@ -175,7 +175,7 @@ export default function App() {
 
         {/* Transparent Elegant Footer */}
         <footer className="relative z-10 py-4 border-t border-white/10 text-center font-mono text-[10px] text-slate-450 bg-slate-950/40 backdrop-blur-sm">
-          INVENTONE PLATFORM © 2026 - TOUS DROITS RÉSERVÉS
+          INVENTONE PLATFORM © 2026 - TOUS DROITS RÉSERVÉS — POWERED BY JERTTECH
         </footer>
       </div>
     );
@@ -218,7 +218,7 @@ export default function App() {
         </main>
 
         <footer className="py-4 border-t border-slate-200 text-center font-mono text-[10px] text-slate-500 bg-white">
-          INVENTONE PLATFORM © 2026 - TOUS DROITS RÉSERVÉS
+          INVENTONE PLATFORM © 2026 - TOUS DROITS RÉSERVÉS — POWERED BY JERTTECH
         </footer>
       </div>
     );
@@ -238,7 +238,7 @@ export default function App() {
       </main>
 
       <footer className="py-5 border-t border-slate-200 text-center font-mono text-[10.5px] text-slate-500 bg-white">
-        INVENTONE SYSTEM CONTROL © 2026 - DÉPLOYÉ EN MODE SÉCURISÉ
+        INVENTONE SYSTEM CONTROL © 2026 - DÉPLOYÉ EN MODE SÉCURISÉ | POWERED BY JERTTECH
       </footer>
     </div>
   );
