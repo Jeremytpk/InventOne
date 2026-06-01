@@ -1,0 +1,289 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 1. Global safety net - Default deny everything
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Checking if the user is jeremytopaka@gmail.com OR has verified admin role in Firestore
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == "jeremytopaka@gmail.com" || (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin" &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true
+        )
+      );
+    }
+
+    // Checking if the user is approved (either admin or approved client)
+    function isApproved() {
+      return isSignedIn() && (
+        request.auth.token.email == "jeremytopaka@gmail.com" || (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true
+        )
+      );
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Entity Schemas Validation
+    function isValidUser(user) {
+      return user.name is string && user.name.size() <= 200
+        && user.approved is bool
+        && user.role in ['admin', 'client']
+        && user.createdAt is timestamp
+        && (!('email' in user) || (user.email is string && user.email.size() <= 200))
+        && (!('firstName' in user) || (user.firstName is string && user.firstName.size() <= 100))
+        && (!('lastName' in user) || (user.lastName is string && user.lastName.size() <= 100))
+        && (!('accountType' in user) || (user.accountType in ['personnel', 'compagnie']))
+        && (!('phone' in user) || (user.phone is string && user.phone.size() <= 50))
+        && (!('address' in user) || (user.address is string && user.address.size() <= 300))
+        && (!('companyName' in user) || (user.companyName is string && user.companyName.size() <= 200))
+        && (!('companyAddress' in user) || (user.companyAddress is string && user.companyAddress.size() <= 300))
+        && (!('productSold' in user) || (user.productSold is string && user.productSold.size() <= 300))
+        && (!('companyId' in user) || (user.companyId is string && user.companyId.size() <= 128))
+        && (!('requestedCompanyId' in user) || (user.requestedCompanyId is string && user.requestedCompanyId.size() <= 128))
+        && (!('requestedCompanyName' in user) || (user.requestedCompanyName is string && user.requestedCompanyName.size() <= 200));
+    }
+
+    function isValidCompany(comp) {
+      return comp.name is string && comp.name.size() <= 200
+        && comp.address is string && comp.address.size() <= 300
+        && comp.productSold is string && comp.productSold.size() <= 300
+        && comp.phone is string && comp.phone.size() <= 50
+        && comp.contactFirstName is string && comp.contactFirstName.size() <= 100
+        && comp.contactLastName is string && comp.contactLastName.size() <= 100
+        && comp.contactEmail is string && comp.contactEmail.size() <= 200
+        && comp.createdAt is timestamp;
+    }
+
+    function isValidCompanyRequest(req) {
+      return req.uid is string && req.uid.size() <= 128
+        && req.firstName is string && req.firstName.size() <= 100
+        && req.lastName is string && req.lastName.size() <= 100
+        && req.email is string && req.email.size() <= 200
+        && req.phone is string && req.phone.size() <= 50
+        && req.companyName is string && req.companyName.size() <= 200
+        && req.companyAddress is string && req.companyAddress.size() <= 300
+        && req.productSold is string && req.productSold.size() <= 300
+        && req.createdAt is timestamp
+        && req.status in ['pending', 'approved', 'rejected'];
+    }
+
+    function isValidInventoryItem(item) {
+      return item.name is string && item.name.size() <= 200
+        && item.quantity is int
+        && item.minStockAlert is int
+        && item.updatedAt == request.time;
+    }
+
+    function isValidClientStock(stock) {
+      return stock.clientId is string && stock.clientId.size() <= 128
+        && stock.clientName is string && stock.clientName.size() <= 200
+        && stock.articleId is string && stock.articleId.size() <= 128
+        && stock.articleName is string && stock.articleName.size() <= 200
+        && stock.assignedQuantity is int
+        && stock.currentStock is int
+        && stock.lastUpdated == request.time;
+    }
+
+    function isValidAuditLog(log) {
+      return log.type in ['add_stock', 'sub_stock', 'distribute_client', 'client_report']
+        && log.articleName is string && log.articleName.size() <= 200
+        && log.quantity is int
+        && log.operatorEmail is string && log.operatorEmail.size() <= 200
+        && log.timestamp == request.time
+        && (!('clientId' in log) || log.clientId is string)
+        && (!('clientName' in log) || log.clientName is string);
+    }
+
+    // Matches for /users/{userId}
+    match /users/{userId} {
+      allow get: if isSignedIn() && request.auth.uid == userId;
+      allow get: if isSignedIn() && request.auth.token.email == "jeremytopaka@gmail.com";
+      allow get: if isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin" && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true;
+      allow list: if isSignedIn() && (
+        request.auth.token.email == "jeremytopaka@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin" && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.accountType == "compagnie" && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true)
+      );
+      
+      allow create: if isSignedIn() && (
+        (request.auth.uid == userId && isValidUser(incoming()) && (
+          (request.auth.token.email == "jeremytopaka@gmail.com" && incoming().role == "admin" && incoming().approved == true) || 
+          (request.auth.token.email != "jeremytopaka@gmail.com" && incoming().role == "client" && incoming().approved == false)
+        )) ||
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.accountType == "compagnie" && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true &&
+          incoming().companyId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.companyId &&
+          incoming().accountType == "personnel" &&
+          incoming().approved == true &&
+          isValidUser(incoming())
+        )
+      );
+      
+      allow update: if isSignedIn() && (
+        request.auth.token.email == "jeremytopaka@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin" && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true) ||
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.accountType == "compagnie" && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true &&
+          resource.data.companyId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.companyId &&
+          incoming().companyId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.companyId &&
+          incoming().accountType == "personnel" &&
+          incoming().approved == true &&
+          isValidUser(incoming())
+        )
+      ) && isValidUser(incoming());
+      
+      allow delete: if isSignedIn() && (
+        request.auth.token.email == "jeremytopaka@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin" && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true) ||
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.accountType == "compagnie" && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true &&
+          resource.data.companyId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.companyId &&
+          resource.data.accountType == "personnel"
+        )
+      );
+    }
+
+    // Matches for /inventory/{itemId}
+    match /inventory/{itemId} {
+      allow read, get, list: if isSignedIn() && (
+        request.auth.token.email == "jeremytopaka@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true)
+      );
+      allow create: if isSignedIn() && (
+        request.auth.token.email == "jeremytopaka@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin" && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.accountType == "compagnie" && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true && itemId == "bidon_huile_" + get(/databases/$(database)/documents/users/$(request.auth.uid)).data.companyId)
+      ) && isValidInventoryItem(incoming()) && isValidId(itemId);
+      
+      allow update: if isSignedIn() && (
+        request.auth.token.email == "jeremytopaka@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin" && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.accountType == "compagnie" && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true && itemId == "bidon_huile_" + get(/databases/$(database)/documents/users/$(request.auth.uid)).data.companyId)
+      ) && isValidInventoryItem(incoming()) && isValidId(itemId);
+      
+      allow delete: if isSignedIn() && (
+        request.auth.token.email == "jeremytopaka@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin" && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true)
+      );
+    }
+
+    // Matches for /clientStocks/{clientStockId}
+    match /clientStocks/{clientStockId} {
+      allow read, get, list: if isSignedIn() && request.auth.token.email == "jeremytopaka@gmail.com";
+      allow read, get, list: if isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin" && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true;
+      allow read, get, list: if isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.accountType == "compagnie" && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true;
+      allow read, get, list: if isSignedIn() && clientStockId == "bidon_huile_" + request.auth.uid && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true;
+      allow read, get, list: if isSignedIn() && resource != null && resource.data.clientId == request.auth.uid && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true;
+      
+      allow create: if isSignedIn() && (
+        request.auth.token.email == "jeremytopaka@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin" && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.accountType == "compagnie" && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true &&
+         exists(/databases/$(database)/documents/users/$(incoming().clientId)) && get(/databases/$(database)/documents/users/$(incoming().clientId)).data.companyId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.companyId)
+      ) && isValidClientStock(incoming()) && isValidId(clientStockId);
+      
+      allow update: if isSignedIn() && isValidId(clientStockId) && (
+        request.auth.token.email == "jeremytopaka@gmail.com" && isValidClientStock(incoming())
+      );
+      allow update: if isSignedIn() && isValidId(clientStockId) && (
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin" && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true && isValidClientStock(incoming())
+      );
+      allow update: if isSignedIn() && isValidId(clientStockId) && (
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.accountType == "compagnie" && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true &&
+        exists(/databases/$(database)/documents/users/$(resource.data.clientId)) && get(/databases/$(database)/documents/users/$(resource.data.clientId)).data.companyId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.companyId &&
+        isValidClientStock(incoming())
+      );
+      allow update: if isSignedIn() && isValidId(clientStockId) && (
+        clientStockId == "bidon_huile_" + request.auth.uid &&
+        resource != null && resource.data.clientId == request.auth.uid && 
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true &&
+        isValidClientStock(incoming()) && 
+        incoming().diff(existing()).affectedKeys().hasOnly(['currentStock', 'lastUpdated'])
+      );
+      
+      allow delete: if isSignedIn() && (
+        request.auth.token.email == "jeremytopaka@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin" && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true) ||
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.accountType == "compagnie" && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true &&
+          exists(/databases/$(database)/documents/users/$(resource.data.clientId)) &&
+          get(/databases/$(database)/documents/users/$(resource.data.clientId)).data.companyId == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.companyId
+        )
+      );
+    }
+
+    // Matches for /auditLogs/{logId}
+    match /auditLogs/{logId} {
+      allow read, get, list: if isSignedIn() && (
+        request.auth.token.email == "jeremytopaka@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin" && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true)
+      );
+      allow create: if isSignedIn() && (
+        request.auth.token.email == "jeremytopaka@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true)
+      ) && isValidAuditLog(incoming()) && isValidId(logId);
+      allow update, delete: if false;
+    }
+
+    // Matches for /compagnies/{companyId}
+    match /compagnies/{companyId} {
+      allow read, get, list: if true;
+      allow create: if isSignedIn() && (
+        request.auth.token.email == "jeremytopaka@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin" && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true)
+      ) && isValidCompany(incoming()) && isValidId(companyId);
+      allow update: if isSignedIn() && (
+        request.auth.token.email == "jeremytopaka@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin" && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true)
+      ) && isValidCompany(incoming()) && isValidId(companyId);
+      allow delete: if isSignedIn() && (
+        request.auth.token.email == "jeremytopaka@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin" && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true)
+      );
+    }
+
+    // Matches for /companyRequests/{requestId}
+    match /companyRequests/{requestId} {
+      allow read, get, list: if isSignedIn() && (
+        request.auth.token.email == "jeremytopaka@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin" && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true)
+      );
+      allow create: if isSignedIn() && isValidCompanyRequest(incoming()) && isValidId(requestId) && incoming().uid == request.auth.uid;
+      allow update: if isSignedIn() && (
+        request.auth.token.email == "jeremytopaka@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin" && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true)
+      ) && isValidCompanyRequest(incoming());
+      allow delete: if isSignedIn() && isAdmin();
+    }
+  }
+}

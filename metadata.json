@@ -1,0 +1,6 @@
+{
+  "name": "InventOne",
+  "description": "Système d'inventaire sécurisé pour la gestion de stock de bidons d'huile, avec tableau de bord, comptes clients, et approbation d'accès admin.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,130 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 1. Global safety net - Default deny everything
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Checking if the user is jeremytopaka@gmail.com OR has verified admin role in Firestore
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == "jeremytopaka@gmail.com" || (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin" &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true
+        )
+      );
+    }
+
+    // Checking if the user is approved (either admin or approved client)
+    function isApproved() {
+      return isSignedIn() && (
+        request.auth.token.email == "jeremytopaka@gmail.com" || (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true
+        )
+      );
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Entity Schemas Validation
+    function isValidUser(user) {
+      return user.email is string && user.email.size() <= 200
+        && user.name is string && user.name.size() <= 200
+        && user.approved is bool
+        && user.role in ['admin', 'client']
+        && user.createdAt is timestamp;
+    }
+
+    function isValidInventoryItem(item) {
+      return item.name is string && item.name.size() <= 200
+        && item.quantity is int
+        && item.minStockAlert is int
+        && item.updatedAt == request.time;
+    }
+
+    function isValidClientStock(stock) {
+      return stock.clientId is string && stock.clientId.size() <= 128
+        && stock.clientName is string && stock.clientName.size() <= 200
+        && stock.articleId is string && stock.articleId.size() <= 128
+        && stock.articleName is string && stock.articleName.size() <= 200
+        && stock.assignedQuantity is int
+        && stock.currentStock is int
+        && stock.lastUpdated == request.time;
+    }
+
+    function isValidAuditLog(log) {
+      return log.type in ['add_stock', 'sub_stock', 'distribute_client', 'client_report']
+        && log.articleName is string && log.articleName.size() <= 200
+        && log.quantity is int
+        && log.operatorEmail is string && log.operatorEmail.size() <= 200
+        && log.timestamp == request.time
+        && (!('clientId' in log) || log.clientId is string)
+        && (!('clientName' in log) || log.clientName is string);
+    }
+
+    // Matches for /users/{userId}
+    match /users/{userId} {
+      allow get: if isSignedIn() && (isAdmin() || request.auth.uid == userId);
+      allow list: if isSignedIn() && isAdmin();
+      
+      allow create: if isSignedIn() && request.auth.uid == userId && isValidUser(incoming()) && (
+        (request.auth.token.email == "jeremytopaka@gmail.com" && incoming().role == "admin" && incoming().approved == true) || 
+        (request.auth.token.email != "jeremytopaka@gmail.com" && incoming().role == "client" && incoming().approved == false)
+      );
+      
+      allow update: if isSignedIn() && isAdmin() && isValidUser(incoming());
+      allow delete: if isSignedIn() && isAdmin();
+    }
+
+    // Matches for /inventory/{itemId}
+    match /inventory/{itemId} {
+      allow read, get: if isSignedIn() && isApproved();
+      allow list: if isSignedIn() && isApproved();
+      allow create: if isSignedIn() && isAdmin() && isValidInventoryItem(incoming()) && isValidId(itemId);
+      allow update: if isSignedIn() && isAdmin() && isValidInventoryItem(incoming()) && isValidId(itemId);
+      allow delete: if isSignedIn() && isAdmin();
+    }
+
+    // Matches for /clientStocks/{clientStockId}
+    match /clientStocks/{clientStockId} {
+      allow read, get: if isSignedIn() && (isAdmin() || (isApproved() && resource.data.clientId == request.auth.uid));
+      allow list: if isSignedIn() && (isAdmin() || (isApproved() && resource.data.clientId == request.auth.uid));
+      
+      allow create: if isSignedIn() && isAdmin() && isValidClientStock(incoming()) && isValidId(clientStockId);
+      
+      allow update: if isSignedIn() && isValidId(clientStockId) && (
+        (isAdmin() && isValidClientStock(incoming())) ||
+        (isApproved() && resource.data.clientId == request.auth.uid && isValidClientStock(incoming()) && incoming().diff(existing()).affectedKeys().hasOnly(['currentStock', 'lastUpdated']))
+      );
+      
+      allow delete: if isSignedIn() && isAdmin();
+    }
+
+    // Matches for /auditLogs/{logId}
+    match /auditLogs/{logId} {
+      allow read, get: if isSignedIn() && isAdmin();
+      allow list: if isSignedIn() && isAdmin();
+      allow create: if isSignedIn() && isApproved() && isValidAuditLog(incoming()) && isValidId(logId);
+      allow update, delete: if false;
+    }
+  }
+}

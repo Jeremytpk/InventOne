@@ -1,0 +1,171 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Profil de l'utilisateur avec rôle et état d'approbation.",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "approved": {
+          "type": "boolean"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "client"]
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["email", "name", "approved", "role", "createdAt"]
+    },
+    "InventoryItem": {
+      "title": "InventoryItem",
+      "description": "Article en stock comme un bidon d'huile.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "quantity": {
+          "type": "integer"
+        },
+        "minStockAlert": {
+          "type": "integer"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["name", "quantity", "minStockAlert", "updatedAt"]
+    },
+    "ClientStock": {
+      "title": "ClientStock",
+      "description": "Aperçu de la quantité livrée et restante chez le client.",
+      "type": "object",
+      "properties": {
+        "clientId": {
+          "type": "string"
+        },
+        "clientName": {
+          "type": "string"
+        },
+        "articleId": {
+          "type": "string"
+        },
+        "articleName": {
+          "type": "string"
+        },
+        "assignedQuantity": {
+          "type": "integer"
+        },
+        "currentStock": {
+          "type": "integer"
+        },
+        "lastUpdated": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["clientId", "clientName", "articleId", "articleName", "assignedQuantity", "currentStock", "lastUpdated"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Historique des transactions d'inventaire.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["add_stock", "sub_stock", "distribute_client", "client_report"]
+        },
+        "articleName": {
+          "type": "string"
+        },
+        "quantity": {
+          "type": "integer"
+        },
+        "clientId": {
+          "type": "string"
+        },
+        "clientName": {
+          "type": "string"
+        },
+        "operatorEmail": {
+          "type": "string"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["type", "articleName", "quantity", "operatorEmail", "timestamp"]
+    },
+    "Company": {
+      "title": "Company",
+      "description": "Compagnie partenaire validée dans InventOne.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "address": { "type": "string" },
+        "productSold": { "type": "string" },
+        "phone": { "type": "string" },
+        "contactFirstName": { "type": "string" },
+        "contactLastName": { "type": "string" },
+        "contactEmail": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "address", "productSold", "phone", "contactFirstName", "contactLastName", "contactEmail", "createdAt"]
+    },
+    "CompanyRequest": {
+      "title": "CompanyRequest",
+      "description": "Demande de création de compagnie en attente de validation.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "firstName": { "type": "string" },
+        "lastName": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "companyName": { "type": "string" },
+        "companyAddress": { "type": "string" },
+        "productSold": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] }
+      },
+      "required": ["uid", "firstName", "lastName", "email", "phone", "companyName", "companyAddress", "productSold", "createdAt", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Profils des utilisateurs pour InventOne."
+    },
+    "/inventory/{itemId}": {
+      "schema": "InventoryItem",
+      "description": "Articles du stock central (ex: Bidon d'huile)."
+    },
+    "/clientStocks/{clientStockId}": {
+      "schema": "ClientStock",
+      "description": "Suivi des quantités de bidons d'huile chez chaque client."
+    },
+    "/auditLogs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Historique de toutes les activités d'inventaire de la plateforme."
+    },
+    "/compagnies/{companyId}": {
+      "schema": "Company",
+      "description": "Liste des compagnies partenaires validées."
+    },
+    "/companyRequests/{requestId}": {
+      "schema": "CompanyRequest",
+      "description": "Demandes d'enregistrement de compagnies partenaires."
+    }
+  }
+}
