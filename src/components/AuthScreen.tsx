@@ -689,14 +689,7 @@ export default function AuthScreen() {
           )}
         </div>
 
-        {/* Demo administrator account details for assessment */}
-        <div className="bg-blue-50 border border-blue-100 text-blue-700 rounded-lg p-3 text-[10.5px] font-mono text-center leading-relaxed">
-          <span className="font-bold uppercase tracking-wider block text-[9.5px] mb-1">💡 COMPTE DEMO ADMINISTRATEUR :</span>
-          <span>E-mail : </span>
-          <span className="font-bold">jeremytopaka@gmail.com</span>
-          <span> | Code d'accès : </span>
-          <span className="font-bold">123123</span>
-        </div>
+
       </div>
     </div>
   );
