@@ -60,12 +60,12 @@ export default function Navbar({ currentUser }: NavbarProps) {
 
             <button
               onClick={handleLogOut}
-              className="flex items-center justify-center gap-1.5 px-3 h-8 text-xs font-semibold text-slate-300 bg-transparent hover:bg-white/10 border border-slate-750 rounded transition-all font-sans cursor-pointer"
+              className="flex items-center justify-center gap-1.5 px-2.5 xs:px-3 h-8 text-xs font-semibold text-slate-300 bg-transparent hover:bg-white/10 border border-slate-750 rounded transition-all font-sans cursor-pointer"
               title="Se déconnecter"
               id="logout-btn"
             >
               <LogOut className="h-3.5 w-3.5" />
-              <span>Déconnexion</span>
+              <span className="hidden xs:inline">Déconnexion</span>
             </button>
           </div>
         )}

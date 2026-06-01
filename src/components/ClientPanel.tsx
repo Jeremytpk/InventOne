@@ -211,14 +211,14 @@ export default function ClientPanel({ clientUser }: ClientPanelProps) {
 
                   {/* Feedback messaging */}
                   {errorStr && (
-                    <div className="p-3 bg-red-50 border border-red-250 text-red-700 text-xs rounded flex items-center gap-2 animate-pulse" id="client-error">
+                    <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded flex items-center gap-2 animate-pulse" id="client-error">
                       <AlertTriangle className="h-4 w-4 shrink-0 text-red-650" />
                       <span>{errorStr}</span>
                     </div>
                   )}
 
                   {successStr && (
-                    <div className="p-3 bg-emerald-50 border border-emerald-250 text-emerald-800 text-xs rounded flex items-center gap-2" id="client-success">
+                    <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded flex items-center gap-2" id="client-success">
                       <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-650" />
                       <span>{successStr}</span>
                     </div>
@@ -248,7 +248,7 @@ export default function ClientPanel({ clientUser }: ClientPanelProps) {
                           max={clientStock.assignedQuantity}
                           value={reportedQty}
                           onChange={(e) => setReportedQty(Math.min(clientStock.assignedQuantity, Math.max(0, parseInt(e.target.value) || 0)))}
-                          className="w-full h-9 bg-white text-slate-900 border border-slate-250 focus:border-blue-600 text-sm font-sans font-bold text-center rounded shadow-inner"
+                          className="w-full h-9 bg-white text-slate-900 border border-slate-200 focus:border-blue-600 text-sm font-sans font-bold text-center rounded shadow-inner"
                           id="report-qty-input"
                         />
                       </div>

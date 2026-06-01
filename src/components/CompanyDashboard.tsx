@@ -507,7 +507,8 @@ export default function CompanyDashboard({ companyUser }: CompanyDashboardProps)
       // Update name inside clientStock
       const clientStockRef = doc(db, 'clientStocks', `bidon_huile_${editingCollabId}`);
       await setDoc(clientStockRef, {
-        clientName: editCollabName.trim()
+        clientName: editCollabName.trim(),
+        lastUpdated: serverTimestamp(),
       }, { merge: true });
 
       setActionSuccess(`Données de "${editCollabName.trim()}" enregistrées.`);
@@ -676,7 +677,7 @@ export default function CompanyDashboard({ companyUser }: CompanyDashboardProps)
                   </div>
 
                   {/* Operational Adjusters block (Add/Subtract master quantity) */}
-                  <div className="bg-slate-50/50 border border-slate-150 rounded-lg p-3 sm:p-4 space-y-3 sm:space-y-4">
+                  <div className="bg-slate-50/50 border border-slate-200 rounded-lg p-3 sm:p-4 space-y-3 sm:space-y-4">
                     <div className="space-y-0.5">
                       <h4 className="text-[11px] sm:text-xs font-sans font-bold text-slate-800 uppercase tracking-wide">Approvisionner ou Retirer du Stock Central</h4>
                       <p className="text-[10px] sm:text-[10.5px] text-slate-400 font-medium">Ravitaillez le stock disponible au siège de votre compagnie ou procédez à des corrections manuelles.</p>
@@ -691,7 +692,7 @@ export default function CompanyDashboard({ companyUser }: CompanyDashboardProps)
                             value={stockModifyQty}
                             onChange={(e) => setStockModifyQty(e.target.value)}
                             placeholder="Ex: 10"
-                            className="w-full h-9 bg-white text-slate-900 border border-slate-250 focus:border-blue-600 text-xs font-sans font-bold text-center rounded shadow-inner"
+                            className="w-full h-9 bg-white text-slate-900 border border-slate-200 focus:border-blue-600 text-xs font-sans font-bold text-center rounded shadow-inner"
                           />
                         </div>
                       </div>
@@ -733,7 +734,7 @@ export default function CompanyDashboard({ companyUser }: CompanyDashboardProps)
                   <Users className="h-4.5 w-4.5 text-blue-600" />
                   <h3 className="text-xs sm:text-sm font-sans font-extrabold text-[#0f172a] uppercase tracking-wider">Suivi Consommation Clients</h3>
                 </div>
-                <span className="px-2 py-0.5 text-[8.5px] sm:text-[9px] font-mono font-bold text-blue-700 bg-blue-50 rounded border border-blue-150 shrink-0 w-fit">
+                <span className="px-2 py-0.5 text-[8.5px] sm:text-[9px] font-mono font-bold text-blue-700 bg-blue-50 rounded border border-blue-200 shrink-0 w-fit">
                   {myClients.length} membre(s) approuvé(s)
                 </span>
               </div>
@@ -813,7 +814,7 @@ export default function CompanyDashboard({ companyUser }: CompanyDashboardProps)
                                     Alerte
                                   </span>
                                 ) : (
-                                  <span className="inline-flex items-center gap-0.5 text-[8.5px] sm:text-[9.5px] font-bold text-emerald-850 bg-emerald-50 px-1 py-0.5 rounded border border-emerald-150">
+                                  <span className="inline-flex items-center gap-0.5 text-[8.5px] sm:text-[9.5px] font-bold text-emerald-850 bg-emerald-50 px-1 py-0.5 rounded border border-emerald-200">
                                     OK
                                   </span>
                                 )
@@ -855,7 +856,7 @@ export default function CompanyDashboard({ companyUser }: CompanyDashboardProps)
               <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
                 
                 {/* Creation or Editing Form Column */}
-                <div className="md:col-span-5 bg-slate-50/50 p-4 border border-slate-250 rounded-lg space-y-4">
+                <div className="md:col-span-5 bg-slate-50/50 p-4 border border-slate-200 rounded-lg space-y-4">
                   <div className="space-y-1">
                     <h3 className="text-xs font-sans font-bold text-slate-800 uppercase tracking-wide">
                       {editingCollabId ? "Modifier Collaborateur" : "Nouveau Collaborateur"}
@@ -1034,7 +1035,7 @@ export default function CompanyDashboard({ companyUser }: CompanyDashboardProps)
                                 e.stopPropagation();
                                 setCollabToDelete(client);
                               }}
-                              className="h-7 w-7 text-slate-400 hover:text-red-600 hover:bg-red-50/50 rounded flex items-center justify-center border border-slate-205 cursor-pointer transition-all"
+                              className="h-7 w-7 text-slate-400 hover:text-red-600 hover:bg-red-50/50 rounded flex items-center justify-center border border-slate-200 cursor-pointer transition-all"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
@@ -1334,18 +1335,20 @@ export default function CompanyDashboard({ companyUser }: CompanyDashboardProps)
               <div className="flex items-center justify-end gap-2 pt-1">
                 <button
                   type="button"
+                  disabled={loadingAction}
                   onClick={() => setCollabToDelete(null)}
-                  className="flex-1 sm:flex-initial px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-sans font-bold text-[10.5px] sm:text-xs uppercase tracking-wider rounded cursor-pointer transition-colors border border-slate-200 text-center"
+                  className="flex-1 sm:flex-initial px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-sans font-bold text-[10.5px] sm:text-xs uppercase tracking-wider rounded cursor-pointer transition-colors border border-slate-200 text-center disabled:opacity-50"
                 >
                   Annuler
                 </button>
                 <button
                   type="button"
+                  disabled={loadingAction}
                   onClick={() => executeDeleteCollaborator(collabToDelete)}
-                  className="flex-1 sm:flex-initial px-3.5 py-1.5 bg-red-600 hover:bg-red-700 text-white font-sans font-extrabold text-[10.5px] sm:text-xs uppercase tracking-wider rounded cursor-pointer transition-colors shadow-sm flex items-center justify-center gap-1.5"
+                  className="flex-1 sm:flex-initial px-3.5 py-1.5 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white border border-red-700 font-sans font-extrabold text-[10.5px] sm:text-xs uppercase tracking-wider rounded cursor-pointer transition-colors shadow-sm flex items-center justify-center gap-1.5 disabled:cursor-not-allowed"
                 >
                   <Trash2 className="h-3 w-3" />
-                  Oui, Supprimer
+                  {loadingAction ? "Suppression EN COURS..." : "Oui, Supprimer"}
                 </button>
               </div>
             </div>

@@ -103,7 +103,7 @@ service cloud.firestore {
         && stock.articleName is string && stock.articleName.size() <= 200
         && stock.assignedQuantity is int
         && stock.currentStock is int
-        && stock.lastUpdated == request.time;
+        && stock.lastUpdated is timestamp;
     }
 
     function isValidAuditLog(log) {
@@ -118,9 +118,11 @@ service cloud.firestore {
 
     // Matches for /users/{userId}
     match /users/{userId} {
-      allow get: if isSignedIn() && request.auth.uid == userId;
-      allow get: if isSignedIn() && request.auth.token.email == "jeremytopaka@gmail.com";
-      allow get: if isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin" && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true;
+      allow get: if isSignedIn() && (
+        request.auth.uid == userId ||
+        request.auth.token.email == "jeremytopaka@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin" && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true)
+      );
       allow list: if isSignedIn() && (
         request.auth.token.email == "jeremytopaka@gmail.com" ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin" && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.approved == true) ||

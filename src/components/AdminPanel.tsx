@@ -820,7 +820,7 @@ export default function AdminPanel({ adminUser }: AdminPanelProps) {
                     >
                       <div className="flex justify-between items-start gap-4 flex-wrap">
                         <div className="space-y-1">
-                          <p className="font-sans font-extrabold text-xs text-blue-750 uppercase tracking-tight">{req.companyName}</p>
+                          <p className="font-sans font-extrabold text-xs text-blue-700 uppercase tracking-tight">{req.companyName}</p>
                           <p className="text-[10px] text-slate-500 font-medium">Adresse : {req.companyAddress}</p>
                           <p className="text-[10px] text-slate-500 font-semibold font-sans">Produit déclaré : {req.productSold}</p>
                         </div>
@@ -871,7 +871,7 @@ export default function AdminPanel({ adminUser }: AdminPanelProps) {
                       required
                       value={selectedClientForAssign}
                       onChange={(e) => setSelectedClientForAssign(e.target.value)}
-                      className="w-full h-9 bg-slate-50 border border-slate-250 text-slate-800 px-2.5 py-1 text-xs rounded font-sans focus:border-blue-600 focus:bg-white"
+                      className="w-full h-9 bg-slate-50 border border-slate-200 text-slate-800 px-2.5 py-1 text-xs rounded font-sans focus:border-blue-600 focus:bg-white"
                       id="select-client"
                     >
                       <option value="">-- Sélectionner un Client --</option>
@@ -891,7 +891,7 @@ export default function AdminPanel({ adminUser }: AdminPanelProps) {
                       min="1"
                       value={assignQty}
                       onChange={(e) => setAssignQty(Math.max(1, parseInt(e.target.value) || 0))}
-                      className="w-full h-9 bg-slate-50 border border-slate-250 text-slate-800 px-3 rounded text-xs font-sans font-bold focus:border-blue-600 focus:bg-white"
+                      className="w-full h-9 bg-slate-50 border border-slate-200 text-slate-800 px-3 rounded text-xs font-sans font-bold focus:border-blue-600 focus:bg-white"
                       id="input-assign-qty"
                     />
                   </div>
@@ -967,7 +967,7 @@ export default function AdminPanel({ adminUser }: AdminPanelProps) {
                           <span>Stock restant : <strong className="text-slate-800 font-sans font-extrabold">{cStock.currentStock}</strong> / {cStock.assignedQuantity}</span>
                           <span className={criticalLevel ? 'text-amber-700 font-bold' : 'text-slate-500'}>{percentLeft}%</span>
                         </div>
-                        <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden border border-slate-250">
+                        <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden border border-slate-200">
                           <div 
                             className={`h-full rounded-full transition-all duration-300 ${criticalLevel ? 'bg-amber-500' : 'bg-emerald-500'}`}
                             style={{ width: `${Math.min(100, Math.max(0, percentLeft))}%` }}
